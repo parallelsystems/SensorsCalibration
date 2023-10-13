@@ -166,7 +166,6 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
     int idxx = int(pt->x * 200) - int(min_pt_x * 200);
     pro_map[idxy][idxx] = true;
   }
-  std::cout << "\n\ndid pro_map set\n\n";
 
   int max_cnt = 0;
   int max_i, max_j;
@@ -175,11 +174,12 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
   // initial centers with. Not clear how to interpret output of this,
   // but looks relatively similar for our data and theirs
   // Where does the 240 come from? maybe the width of the circles in 200x units?
-  for (int i = 0; i + 240 < pro_map.size(); i += 2) {
-    for (int j = 0; j + 240 < pro_map[0].size(); j += 2) {
+  int region_size = cfg["region_size"];
+  for (int i = 0; i + region_size < pro_map.size(); i += 2) {
+    for (int j = 0; j + region_size < pro_map[0].size(); j += 2) {
       int cnt = 0;
-      for (int ii = i; ii - i <= 240; ii += 2) {
-        for (int jj = j; jj - j <= 240; jj += 2) {
+      for (int ii = i; ii - i <= region_size; ii += 2) {
+        for (int jj = j; jj - j <= region_size; jj += 2) {
           if (pro_map[ii][jj])
             // If there is a point at this location, increment
             cnt++;
@@ -220,6 +220,9 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
   initial_centers->push_back(center);
   pcl::io::savePCDFileASCII("initial_centers.pcd", *initial_centers);
 
+  int neighborhood_size = cfg["neighborhood_size"];
+  int max_distance = neighborhood_size * 2 + 1;
+  std::cout << "max_distance = " << max_distance << "\n";
   // circle detection
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_f(
       new pcl::PointCloud<pcl::PointXYZ>),
@@ -227,38 +230,49 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
   for (pcl::PointCloud<pcl::PointXYZ>::iterator pt =
            initial_centers->points.begin();
        pt < initial_centers->points.end(); ++pt) {
+    
     int initial_x = int(pt->y * 200) - int(min_pt_x * 200);
     // Check overflow
-    if (initial_x + 20 + 21 >= pro_map.size()) {
-      initial_x = pro_map.size() - 20 - 21 - 1;
+    if (initial_x + max_distance >= pro_map.size()) {
+      initial_x = pro_map.size() - max_distance - 1;
+    } else if (initial_x - max_distance < 0) {
+      initial_x = max_distance;
     }
 
+    std::cout << "pro_map[0].size() = " << pro_map[0].size() << "\n";
     int initial_y = int(pt->z * 200) - int(min_pt_y * 200);
-    if (initial_y + 20 + 21 >= pro_map[0].size()) {
-      initial_y = pro_map[0].size() - 20 - 21 - 1;
+    if (initial_y + max_distance >= pro_map[0].size()) {
+      initial_y = pro_map[0].size() - max_distance - 1;
+    } else if (initial_y - max_distance < 0) {
+      initial_y = max_distance;
     }
   
-    std::cout << "initial: " << initial_x << ',' << initial_y << std::endl;
+    std::cout << "\ninitial: " << initial_x << ',' << initial_y << std::endl;
     int min_cnt = 9999;
+    // `cnt_cnt` is used to decrease nudge size after each nudge
     int cnt_cnt = 0;
     pcl::PointXYZ refined_center;
     int final_i, final_j;
-    // Check 40-point neighborhood around initial coordinates of center
-    for (int i = initial_y - 20; i <= initial_y + 20; i++) {
-      for (int j = initial_x - 20; j <= initial_x + 20; j++) {
+
+    // Check neighborhood around initial coordinates of center
+    for (int i = initial_y - neighborhood_size; i <= initial_y + neighborhood_size; i++) {
+      for (int j = initial_x - neighborhood_size; j <= initial_x + neighborhood_size; j++) {
         // Number of valid points visited in this neighborhood
         int cnt = 0;
-        for (int ii = i - 21; ii <= i + 21; ii++) {
-          for (int jj = j - 21; jj <= j + 21; jj++) {
+        for (int ii = i - neighborhood_size - 1; ii <= i + neighborhood_size + 1; ii++) {
+          for (int jj = j - neighborhood_size - 1; jj <= j + neighborhood_size + 1; jj++) {
             if (pro_map[ii][jj]) {
-              // if there is some condition true in neighborhood of this valid point,
-              // increment count
-              if ((ii - i) * (ii - i) + (jj - j) * (jj - j) < 21 * 21)
+              // This is the "point density condition"
+              // Regions with smallest `cnt` are considered centroid candidates
+              // ... but why?
+              if ((ii - i) * (ii - i) + (jj - j) * (jj - j) < (neighborhood_size+1)*(neighborhood_size+1))
                 cnt++;
             }
           }
         }
         if (cnt < min_cnt) {
+          // if there are fewer points here than we've seen before
+          // set this point to be the new center
           cnt_cnt = 1;
           final_i = i;
           final_j = j;
@@ -267,6 +281,7 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
           refined_center.y = float(j) / 200 + min_pt_x;
           refined_center.z = float(i) / 200 + min_pt_y;
         } else if (cnt == min_cnt) {
+          // otherwise, nudge in this direction
           refined_center.y =
               (refined_center.y * cnt_cnt + float(j) / 200 + min_pt_x) /
               (cnt_cnt + 1);
@@ -281,6 +296,7 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
     std::cout << "min_cnt: " << min_cnt << std::endl;
     std::cout << "pro_ct: " << refined_center.y << ',' << refined_center.z
               << std::endl;
+    std::cout << "cnt_cnt: " << cnt_cnt << "\n";
     centroid_candidates->push_back(refined_center);
   }
 
