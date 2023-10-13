@@ -1,0 +1,6 @@
+{
+    "segmentation_dist_threshold": 0.05,
+    "segmentation_eps_angle": 0.05,
+    "corner_to_circle_center_m": 0.3,
+    "circle_center_to_circle_center_m": 0.6
+}

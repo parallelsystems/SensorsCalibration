@@ -6,6 +6,7 @@
 
 #include "round_hole_board/lidar_pattern.h"
 
+
 #include <dirent.h>
 #include <pcl/common/eigen.h>
 #include <pcl/common/transforms.h>
@@ -22,10 +23,13 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/opencv.hpp>
 
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
+
 #include "logging.hpp"
 namespace lidarcalib {
 
-void LidarDetector::LidarDetection(std::string pcds_dir) {
+void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
   pcl::PointCloud<pcl::PointXYZ>::Ptr temp_cloude(
       new pcl::PointCloud<pcl::PointXYZ>);
@@ -61,17 +65,18 @@ void LidarDetector::LidarDetection(std::string pcds_dir) {
 
   velocloud = cloud;
 
-  pcl::PassThrough<pcl::PointXYZ> pass1;
-  pass1.setInputCloud(velocloud);
-  pass1.setFilterFieldName("x");
-  pass1.setFilterLimits(5, 7);
-  pass1.filter(*velo_filtered);
+  // pcl::PassThrough<pcl::PointXYZ> pass1;
+  // pass1.setInputCloud(velocloud);
+  // pass1.setFilterFieldName("x");
+  // pass1.setFilterLimits(5, 7);
+  // pass1.filter(*velo_filtered);
 
-  pcl::PassThrough<pcl::PointXYZ> pass2;
-  pass2.setInputCloud(velo_filtered);
-  pass2.setFilterFieldName("y");
-  pass2.setFilterLimits(-2.5, 0);
-  pass2.filter(*velo_filtered2);
+  // pcl::PassThrough<pcl::PointXYZ> pass2;
+  // pass2.setInputCloud(velo_filtered);
+  // pass2.setFilterFieldName("y");
+  // pass2.setFilterLimits(-2.5, 0);
+  // pass2.filter(*velo_filtered2);
+  velo_filtered2 = velocloud;
 
   pcl::io::savePCDFileBinary("test_filtered.pcd", *velo_filtered2);
   // Plane segmentation
@@ -80,13 +85,15 @@ void LidarDetector::LidarDetection(std::string pcds_dir) {
   Eigen::Vector3f axis(0, 1, 0);
   pcl::SACSegmentation<pcl::PointXYZ> plane_segmentation;
   plane_segmentation.setModelType(pcl::SACMODEL_PARALLEL_PLANE);
-  plane_segmentation.setDistanceThreshold(0.05);
+  plane_segmentation.setDistanceThreshold(cfg["segmentation_dist_threshold"]);
   plane_segmentation.setMethodType(pcl::SAC_RANSAC);
   plane_segmentation.setAxis(axis);
-  plane_segmentation.setEpsAngle(0.05);
+  plane_segmentation.setEpsAngle(cfg["segmentation_eps_angle"]);
   plane_segmentation.setOptimizeCoefficients(true);
   plane_segmentation.setMaxIterations(10);
   plane_segmentation.setInputCloud(velo_filtered2);
+  // `inliers` are points within `velo_filtered2` that lie within segmented plane
+  // `coefficients` are [a, b, c, d] (i.e. Hessian normal form ax + by + cz + d = 0)
   plane_segmentation.segment(*inliers, *coefficients);
 
   float a_final = coefficients->values[0] / coefficients->values[3];
@@ -97,11 +104,12 @@ void LidarDetector::LidarDetection(std::string pcds_dir) {
   extract.setInputCloud(velo_filtered2);
   extract.setIndices(inliers);
   extract.filter(*plane_cloud);
-  // pcl::io::savePCDFileBinary("test_plane.pcd", *plane_cloud);
+  pcl::io::savePCDFileBinary("test_plane.pcd", *plane_cloud);
   edges_cloud = plane_cloud;
   pcl::PointCloud<pcl::PointXYZ>::Ptr plane_edges_cloud(
       new pcl::PointCloud<pcl::PointXYZ>);
 
+  // create a flattened version of plane (i.e. set z->0)
   float theta_z = -atan(b_final / a_final);
   float theta_y = atan(c_final / a_final);
   Eigen::MatrixXf R_y(3, 3), R_z(3, 3);
@@ -111,6 +119,9 @@ void LidarDetector::LidarDetection(std::string pcds_dir) {
   float average_x = 0.0;
   int cnt = 0;
   float min_pt_x = 99, max_pt_x = -99, min_pt_y = 99, max_pt_y = -99;
+  // Find min/max x/y
+  // and create `plane_edges_cloud`, which is a rotated and flattened (z=0)
+  // version of points in `plane_cloud`
   for (pcl::PointCloud<pcl::PointXYZ>::iterator pt =
            edges_cloud->points.begin();
        pt < edges_cloud->points.end(); ++pt) {
@@ -136,26 +147,41 @@ void LidarDetector::LidarDetection(std::string pcds_dir) {
   average_x /= cnt;
   plane_edges_cloud->height = 1;
   plane_edges_cloud->width = plane_edges_cloud->points.size();
-  // pcl::io::savePCDFileASCII("plane_edges_cloud.pcd", *plane_edges_cloud);
+  pcl::io::savePCDFileASCII("plane_edges_cloud.pcd", *plane_edges_cloud);
+
+  // pro_map is discretization of the point cloud space.
+  // entries are `true` where there is a point and `false` else
+  // Why *200 ? Stretch out the floats a bit
+  std::cout << "Making pro_map with outer size: " << int(max_pt_y * 200) - int(min_pt_y * 200) + 1 << "\n";
+  std::cout << "\tand inner size: " << int(max_pt_x * 200) - int(min_pt_x * 200) + 1 << "\n";
+  // Make a 2D vector with shape [y_width*200, x_width*200] where all elements initialized to false
   std::vector<std::vector<bool>> pro_map(
       int(max_pt_y * 200) - int(min_pt_y * 200) + 1,
       std::vector<bool>(int(max_pt_x * 200) - int(min_pt_x * 200) + 1, false));
+  // Iterate over all points in `plane_edges_cloud` and set their element to true
   for (pcl::PointCloud<pcl::PointXYZ>::iterator pt =
            plane_edges_cloud->points.begin();
        pt < plane_edges_cloud->points.end(); ++pt) {
-    pro_map[int(pt->y * 200) - int(min_pt_y * 200)]
-           [int(pt->x * 200) - int(min_pt_x * 200)] = true;
+    int idxy = int(pt->y * 200) - int(min_pt_y * 200);
+    int idxx = int(pt->x * 200) - int(min_pt_x * 200);
+    pro_map[idxy][idxx] = true;
   }
+  std::cout << "\n\ndid pro_map set\n\n";
 
   int max_cnt = 0;
   int max_i, max_j;
 
+  // This loop looks for some kind of "master" point that it defines the
+  // initial centers with. Not clear how to interpret output of this,
+  // but looks relatively similar for our data and theirs
+  // Where does the 240 come from? maybe the width of the circles in 200x units?
   for (int i = 0; i + 240 < pro_map.size(); i += 2) {
     for (int j = 0; j + 240 < pro_map[0].size(); j += 2) {
       int cnt = 0;
       for (int ii = i; ii - i <= 240; ii += 2) {
         for (int jj = j; jj - j <= 240; jj += 2) {
           if (pro_map[ii][jj])
+            // If there is a point at this location, increment
             cnt++;
         }
       }
@@ -166,25 +192,34 @@ void LidarDetector::LidarDetection(std::string pcds_dir) {
       }
     }
   }
+
+  // 0.3, 0.9 must come from geometry of board...
+  // Maybe max_i, max_j point to bottom left corner of board.
+  // 0.3 is diagonal distance from corner to center of closest circle.
+  // 0.9 is distance between two circle centers (except diagonals)
+  float corner_to_circle_center = cfg["corner_to_circle_center_m"];
+  float circle_to_circle = cfg["circle_center_to_circle_center_m"];
   pcl::PointCloud<pcl::PointXYZ>::Ptr initial_centers(
       new pcl::PointCloud<pcl::PointXYZ>);
   pcl::PointXYZ center;
-  center.y = float(max_j) / 200 + min_pt_x + 0.3;
-  center.z = float(max_i) / 200 + min_pt_y + 0.3;
-  std::cout << center.y << ',' << center.z << std::endl;
+  center.y = float(max_j) / 200 + min_pt_x + corner_to_circle_center;
+  center.z = float(max_i) / 200 + min_pt_y + corner_to_circle_center;
+  std::cout << center.x << "," << center.y << ',' << center.z << std::endl;
   initial_centers->push_back(center);
-  center.y = float(max_j) / 200 + min_pt_x + 0.3;
-  center.z = float(max_i) / 200 + min_pt_y + 0.9;
-  std::cout << center.y << ',' << center.z << std::endl;
+  center.y = float(max_j) / 200 + min_pt_x + corner_to_circle_center;
+  center.z = float(max_i) / 200 + min_pt_y + corner_to_circle_center + circle_to_circle;
+  std::cout << center.x << "," << center.y << ',' << center.z << std::endl;
   initial_centers->push_back(center);
-  center.y = float(max_j) / 200 + min_pt_x + 0.9;
-  center.z = float(max_i) / 200 + min_pt_y + 0.3;
-  std::cout << center.y << ',' << center.z << std::endl;
+  center.y = float(max_j) / 200 + min_pt_x + corner_to_circle_center + circle_to_circle;
+  center.z = float(max_i) / 200 + min_pt_y + corner_to_circle_center;
+  std::cout << center.x << "," << center.y << ',' << center.z << std::endl;
   initial_centers->push_back(center);
-  center.y = float(max_j) / 200 + min_pt_x + 0.9;
-  center.z = float(max_i) / 200 + min_pt_y + 0.9;
-  std::cout << center.y << ',' << center.z << std::endl;
+  center.y = float(max_j) / 200 + min_pt_x + corner_to_circle_center + circle_to_circle;
+  center.z = float(max_i) / 200 + min_pt_y + corner_to_circle_center + circle_to_circle;
+  std::cout << center.x << "," << center.y << ',' << center.z << std::endl;
   initial_centers->push_back(center);
+  pcl::io::savePCDFileASCII("initial_centers.pcd", *initial_centers);
+
   // circle detection
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_f(
       new pcl::PointCloud<pcl::PointXYZ>),
@@ -193,18 +228,31 @@ void LidarDetector::LidarDetection(std::string pcds_dir) {
            initial_centers->points.begin();
        pt < initial_centers->points.end(); ++pt) {
     int initial_x = int(pt->y * 200) - int(min_pt_x * 200);
+    // Check overflow
+    if (initial_x + 20 + 21 >= pro_map.size()) {
+      initial_x = pro_map.size() - 20 - 21 - 1;
+    }
+
     int initial_y = int(pt->z * 200) - int(min_pt_y * 200);
+    if (initial_y + 20 + 21 >= pro_map[0].size()) {
+      initial_y = pro_map[0].size() - 20 - 21 - 1;
+    }
+  
     std::cout << "initial: " << initial_x << ',' << initial_y << std::endl;
     int min_cnt = 9999;
     int cnt_cnt = 0;
     pcl::PointXYZ refined_center;
     int final_i, final_j;
+    // Check 40-point neighborhood around initial coordinates of center
     for (int i = initial_y - 20; i <= initial_y + 20; i++) {
       for (int j = initial_x - 20; j <= initial_x + 20; j++) {
+        // Number of valid points visited in this neighborhood
         int cnt = 0;
         for (int ii = i - 21; ii <= i + 21; ii++) {
           for (int jj = j - 21; jj <= j + 21; jj++) {
             if (pro_map[ii][jj]) {
+              // if there is some condition true in neighborhood of this valid point,
+              // increment count
               if ((ii - i) * (ii - i) + (jj - j) * (jj - j) < 21 * 21)
                 cnt++;
             }
@@ -235,6 +283,8 @@ void LidarDetector::LidarDetection(std::string pcds_dir) {
               << std::endl;
     centroid_candidates->push_back(refined_center);
   }
+
+  // Move predicted points back into original basis
   pcl::PointCloud<pcl::PointXYZ>::Ptr circle_cloud(
       new pcl::PointCloud<pcl::PointXYZ>);
   Eigen::MatrixXf R_inv = R.inverse();
