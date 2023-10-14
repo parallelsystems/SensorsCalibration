@@ -300,6 +300,54 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
     centroid_candidates->push_back(refined_center);
   }
 
+  // Calculate implied coordinates of fiducials from centroids
+  // Do this now because board lies within a constant-x plane,
+  // so math is easy
+  pcl::PointCloud<pcl::PointXYZ>::Ptr fiducial_centers(new pcl::PointCloud<pcl::PointXYZ>);
+  pcl::PointXYZ fidicual0(
+    centroid_candidates->points[0].x,
+    (centroid_candidates->points[0].y + centroid_candidates->points[1].y) / 2,
+    (centroid_candidates->points[0].z + centroid_candidates->points[1].z) / 2
+  );
+  pcl::PointXYZ fidicual1(
+    centroid_candidates->points[0].x,
+    (centroid_candidates->points[0].y + centroid_candidates->points[2].y) / 2,
+    (centroid_candidates->points[0].z + centroid_candidates->points[2].z) / 2
+  );
+  pcl::PointXYZ fidicual2(
+    centroid_candidates->points[0].x,
+    (centroid_candidates->points[1].y + centroid_candidates->points[3].y) / 2,
+    (centroid_candidates->points[1].z + centroid_candidates->points[3].z) / 2
+  );
+  pcl::PointXYZ fidicual3(
+    centroid_candidates->points[0].x,
+    (centroid_candidates->points[2].y + centroid_candidates->points[3].y) / 2,
+    (centroid_candidates->points[2].z + centroid_candidates->points[3].z) / 2
+  );
+  fiducial_centers->push_back(fidicual0);
+  fiducial_centers->push_back(fidicual1);
+  fiducial_centers->push_back(fidicual2);
+  fiducial_centers->push_back(fidicual3);
+
+  float fiducial_side_length_m = cfg["fiducial_side_length_m"];
+  std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> corners_vec;
+  for (unsigned int k = 0; k < 4; k++) {
+    pcl::PointXYZ point = fiducial_centers->points[k];
+    // Now get corner coordinates from fiducial centers
+    pcl::PointCloud<pcl::PointXYZ>::Ptr fiducial_corners(new pcl::PointCloud<pcl::PointXYZ>);
+    for (int i = -1; i <= 1; i += 2) {
+      for (int j = -1; j <= 1; j += 2) {
+          pcl::PointXYZ corner(
+            point.x,
+            point.y + i * fiducial_side_length_m/2,
+            point.z + j * fiducial_side_length_m/2
+          );
+          fiducial_corners->push_back(corner);
+      }
+    }
+    corners_vec.push_back(fiducial_corners);
+  }
+
   // Move predicted points back into original basis
   pcl::PointCloud<pcl::PointXYZ>::Ptr circle_cloud(
       new pcl::PointCloud<pcl::PointXYZ>);
@@ -315,6 +363,26 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
     pt->z = changed(2, 0);
     std::cout << pt->x << "    " << pt->y << "    " << pt->z << std::endl;
     circle_cloud->points.push_back(*pt);
+  }
+
+  // Also for fiducials
+  for (unsigned int k = 0; k < 4; k++) {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr fiducial_corners = corners_vec[k];
+    pcl::PointCloud<pcl::PointXYZ>::Ptr fiducial_corners_rect(new pcl::PointCloud<pcl::PointXYZ>);
+    for (pcl::PointCloud<pcl::PointXYZ>::iterator pt = fiducial_corners->points.begin(); pt < fiducial_corners->points.end(); ++pt) {
+      Eigen::MatrixXf tmp(3, 1);
+      tmp << pt->x, pt->y, pt->z;
+      Eigen::MatrixXf changed = R_inv * tmp;
+      pt->x = changed(0, 0);
+      pt->y = changed(1, 0);
+      pt->z = changed(2, 0);
+      fiducial_corners_rect->points.push_back(*pt);
+    }
+    fiducial_corners_rect->height = 1;
+    fiducial_corners_rect->width = fiducial_corners->points.size();
+    char fname[128];
+    sprintf(fname, "fiducial%u.pcd", k);
+    pcl::io::savePCDFileASCII(fname, *fiducial_corners_rect);
   }
 
   circle_cloud->height = 1;

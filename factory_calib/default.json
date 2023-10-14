@@ -4,5 +4,6 @@
     "corner_to_circle_center_m": 0.3,
     "circle_center_to_circle_center_m": 0.6,
     "region_size": 240,
-    "neighborhood_size": 20
+    "neighborhood_size": 20,
+    "fiducial_side_length_m": 0.26
 }
