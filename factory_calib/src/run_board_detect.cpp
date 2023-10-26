@@ -23,6 +23,9 @@
 #include "apriltags/TagDetector.h"
 #include "aruco_marker/corner_detect.hpp"
 
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
+
 // 0: chessboard
 // 1: vertical board
 // 2: circle board
@@ -168,22 +171,18 @@ int main(int argc, char **argv) {
     sta = board_detector.detect(gray_vec, aruco_marker, &corners);
     if (display_img && sta) {
       cv::Mat display_img = image.clone();
-      ofstream corners_file("corners.txt");
-      if (!corners_file.is_open()) {
-        std::cerr << "Failed to open corners file\n";
-        return -1;
-      }
+      json jason;
+
       for (size_t i = 0; i < corners.points.size(); ++i) {
         auto pts = corners.points[i];
         if (pts.size() != 4) {
           LOGE("failed to detect corner");
           return false;
         }
-        // Write points to file
+
         for (size_t j=0; j < 4; j++) {
-          corners_file << pts[j].x << "," << pts[j].y << "\n";
+          jason[std::to_string(i).c_str()][std::to_string(j).c_str()] = { pts[j].x, pts[j].y };
         }
-        corners_file << "\n";
 
         cv::Point p0(pts[0].x, pts[0].y);
         cv::Point p1(pts[1].x, pts[1].y);
@@ -198,9 +197,13 @@ int main(int argc, char **argv) {
         cv::putText(display_img, std::to_string(corners.tag_ids[i]), p,
                     cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(230, 100, 100));
       }
+      ofstream corners_file("cam_fiducial_corners.json");
+      if (!corners_file.is_open()) {
+        std::cerr << "Failed to open corners file\n";
+        return -1;
+      }
+      corners_file << std::setw(4) << jason << std::endl;
       corners_file.close();
-      //cv::imshow("arucomarker", display_img);
-      //cv::waitKey();
       cv::imwrite("arucomarker_detection.png", display_img);
     }
   } else if (type == 4) {
