@@ -8,4 +8,5 @@ cmake-build-release/
 __pycache__/
 *.py[cod]
 *$py.class
-
+factory_calib/tmp/
+factory_calib/output/

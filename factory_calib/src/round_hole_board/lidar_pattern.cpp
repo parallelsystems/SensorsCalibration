@@ -8,6 +8,7 @@
 
 
 #include <dirent.h>
+#include <pcl/common/distances.h>
 #include <pcl/common/eigen.h>
 #include <pcl/common/transforms.h>
 #include <pcl/filters/extract_indices.h>
@@ -93,7 +94,7 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
   // pass2.filter(*velo_filtered2);
   velo_filtered2 = velocloud;
 
-  pcl::io::savePCDFileBinary("test_filtered.pcd", *velo_filtered2);
+  pcl::io::savePCDFileBinary("output/test_filtered.pcd", *velo_filtered2);
   // Plane segmentation
   pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
   pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
@@ -119,7 +120,7 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
   extract.setInputCloud(velo_filtered2);
   extract.setIndices(inliers);
   extract.filter(*plane_cloud);
-  pcl::io::savePCDFileBinary("test_plane.pcd", *plane_cloud);
+  pcl::io::savePCDFileBinary("output/test_plane.pcd", *plane_cloud);
   edges_cloud = plane_cloud;
   pcl::PointCloud<pcl::PointXYZ>::Ptr plane_edges_cloud(
       new pcl::PointCloud<pcl::PointXYZ>);
@@ -162,7 +163,7 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
   average_x /= cnt;
   plane_edges_cloud->height = 1;
   plane_edges_cloud->width = plane_edges_cloud->points.size();
-  pcl::io::savePCDFileASCII("plane_edges_cloud.pcd", *plane_edges_cloud);
+  pcl::io::savePCDFileASCII("output/plane_edges_cloud.pcd", *plane_edges_cloud);
 
   // pro_map is discretization of the point cloud space.
   // entries are `true` where there is a point and `false` else
@@ -233,7 +234,7 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
   center.z = float(max_i) / 200 + min_pt_y + corner_to_circle_center + circle_to_circle;
   std::cout << center.x << "," << center.y << ',' << center.z << std::endl;
   initial_centers->push_back(center);
-  pcl::io::savePCDFileASCII("initial_centers.pcd", *initial_centers);
+  pcl::io::savePCDFileASCII("output/initial_centers.pcd", *initial_centers);
 
   int neighborhood_size = cfg["neighborhood_size"];
   int max_distance = neighborhood_size * 2 + 1;
@@ -332,6 +333,9 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
     std::cout << i << "\n";
   }
 
+  float circle_center_distance_m = euclideanDistance(centroid_candidates->points[0], centroid_candidates->points[1]);
+  std::cout << "circle center distance = " << circle_center_distance_m << "\n";
+
   // Calculate implied coordinates of fiducials from centroids
   // Do this now because board lies within a constant-x plane,
   // so math is easy
@@ -363,6 +367,7 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
 
   // TODO: @jackatparallel determine this from target size
   float fiducial_side_length_m = cfg["fiducial_side_length_m"];
+  std::cout << "fiducial side length " << fiducial_side_length_m << "\n";
   std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> corners_vec;
   for (unsigned int k = 0; k < 4; k++) {
     pcl::PointXYZ point = fiducial_centers->points[k];
@@ -414,14 +419,14 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
     fiducial_corners_rect->height = 1;
     fiducial_corners_rect->width = fiducial_corners->points.size();
     char fname[128];
-    sprintf(fname, "fiducial%u.pcd", k);
+    sprintf(fname, "output/fiducial%u.pcd", k);
     pcl::io::savePCDFileASCII(fname, *fiducial_corners_rect);
   }
 
   circle_cloud->height = 1;
   circle_cloud->width = circle_cloud->points.size();
   //  pcl::io::savePCDFileASCII("final_cloud.pcd", *plane_cloud+*circle_cloud);
-  pcl::io::savePCDFileASCII("circle_cloud.pcd", *circle_cloud);
+  pcl::io::savePCDFileASCII("output/circle_cloud.pcd", *circle_cloud);
 }
 
 } // lidarcalib

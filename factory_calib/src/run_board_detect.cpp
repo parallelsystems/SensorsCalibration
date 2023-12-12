@@ -197,14 +197,14 @@ int main(int argc, char **argv) {
         cv::putText(display_img, std::to_string(corners.tag_ids[i]), p,
                     cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(230, 100, 100));
       }
-      ofstream corners_file("cam_fiducial_corners.json");
+      ofstream corners_file("output/cam_fiducial_corners.json");
       if (!corners_file.is_open()) {
         std::cerr << "Failed to open corners file\n";
         return -1;
       }
       corners_file << std::setw(4) << jason << std::endl;
       corners_file.close();
-      cv::imwrite("arucomarker_detection.png", display_img);
+      cv::imwrite("output/arucomarker_detection.png", display_img);
     }
   } else if (type == 4) {
     AprilTags::TagCodes m_tagCodes(AprilTags::tagCodes36h11);
