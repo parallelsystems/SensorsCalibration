@@ -29,6 +29,21 @@ using json = nlohmann::json;
 #include "logging.hpp"
 namespace lidarcalib {
 
+struct classcomp
+{
+    // Sort point clouds
+    bool operator() (const pcl::PointXYZ& a, const pcl::PointXYZ& b) const
+    {
+        // Do primary sort on y. If ys close, sort on z.
+        if (abs(a.y-b.y) < 0.1) {
+          return a.z < b.z;
+        } else {
+          return a.y < b.y;
+        }
+    }
+};
+
+
 void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
   pcl::PointCloud<pcl::PointXYZ>::Ptr temp_cloude(
@@ -300,35 +315,53 @@ void LidarDetector::LidarDetection(std::string pcds_dir, json cfg) {
     centroid_candidates->push_back(refined_center);
   }
 
+  // Sort the circle centers so that board looks like this. (X) are circles, [X] are aruco fiducials
+  //  |-------------------|
+  //  | (3)    [0]    (2) |
+  //  | [1]           [2] |
+  //  | (1)    [3]    (0) |
+  //  |___________________|
+
+  std::cout << "presort\n";
+  for (auto i : centroid_candidates->points) {
+    std::cout << i << "\n";
+  }
+  std::sort(centroid_candidates->points.begin(), centroid_candidates->points.end(), classcomp());
+  std::cout << "postsort\n";
+  for (auto i : centroid_candidates->points) {
+    std::cout << i << "\n";
+  }
+
   // Calculate implied coordinates of fiducials from centroids
   // Do this now because board lies within a constant-x plane,
   // so math is easy
   pcl::PointCloud<pcl::PointXYZ>::Ptr fiducial_centers(new pcl::PointCloud<pcl::PointXYZ>);
   pcl::PointXYZ fidicual0(
     centroid_candidates->points[0].x,
-    (centroid_candidates->points[0].y + centroid_candidates->points[1].y) / 2,
-    (centroid_candidates->points[0].z + centroid_candidates->points[1].z) / 2
+    (centroid_candidates->points[2].y + centroid_candidates->points[3].y) / 2,
+    (centroid_candidates->points[2].z + centroid_candidates->points[3].z) / 2
   );
   pcl::PointXYZ fidicual1(
-    centroid_candidates->points[0].x,
-    (centroid_candidates->points[0].y + centroid_candidates->points[2].y) / 2,
-    (centroid_candidates->points[0].z + centroid_candidates->points[2].z) / 2
-  );
-  pcl::PointXYZ fidicual2(
     centroid_candidates->points[0].x,
     (centroid_candidates->points[1].y + centroid_candidates->points[3].y) / 2,
     (centroid_candidates->points[1].z + centroid_candidates->points[3].z) / 2
   );
+  pcl::PointXYZ fidicual2(
+    centroid_candidates->points[0].x,
+    (centroid_candidates->points[0].y + centroid_candidates->points[2].y) / 2,
+    (centroid_candidates->points[0].z + centroid_candidates->points[2].z) / 2
+  );
   pcl::PointXYZ fidicual3(
     centroid_candidates->points[0].x,
-    (centroid_candidates->points[2].y + centroid_candidates->points[3].y) / 2,
-    (centroid_candidates->points[2].z + centroid_candidates->points[3].z) / 2
+    (centroid_candidates->points[0].y + centroid_candidates->points[1].y) / 2,
+    (centroid_candidates->points[0].z + centroid_candidates->points[1].z) / 2
   );
   fiducial_centers->push_back(fidicual0);
   fiducial_centers->push_back(fidicual1);
   fiducial_centers->push_back(fidicual2);
   fiducial_centers->push_back(fidicual3);
 
+  // TODO: @jackatparallel determine this from target size
   float fiducial_side_length_m = cfg["fiducial_side_length_m"];
   std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> corners_vec;
   for (unsigned int k = 0; k < 4; k++) {
