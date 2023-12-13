@@ -169,6 +169,14 @@ int main(int argc, char **argv) {
     cameracalib::arucomarker::ArucoMarkerDetector board_detector;
     cameracalib::arucomarker::CornerPoints corners;
     sta = board_detector.detect(gray_vec, aruco_marker, &corners);
+
+    // Note that fiducial corners are enumerated in following order:
+    //
+    //  3------0
+    //  |      |
+    //  |      |
+    //  2------1
+
     if (display_img && sta) {
       cv::Mat display_img = image.clone();
       json jason;
