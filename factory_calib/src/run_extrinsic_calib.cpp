@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
     double height = 1860;
     std::vector<std::vector<double>> intrinsic = {
       {0.4920860489431918 * width, 0.0 * width, 0.5 * width},
-      {0.7615706211434203 * height, 0.0 * height, 0.5 * height},
+      {0.0 * height, 0.7615706211434203 * height, 0.5 * height},
       {0.0, 0.0, 1.0}
     };
 

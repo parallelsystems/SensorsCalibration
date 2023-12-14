@@ -512,8 +512,8 @@ struct ZCostFunctorPnP
         extrin(3,2)=T(0.0);
         extrin(3,3)=T(1.0);
         std::cout << "extrin:\n";
-        for (int i=0; i<3; i++) {
-            for (int j=0; j<3; j++) {
+        for (int i=0; i<4; i++) {
+            for (int j=0; j<4; j++) {
                 std::cout << extrin(i, j) << ", ";
             }
             std::cout << "\n";
@@ -522,14 +522,17 @@ struct ZCostFunctorPnP
         r(0,0)=rx;
         r(1,0)=ry;
         r(2,0)=rz;
-        std::cout << "r: " << r << "\n";
+        std::cout << "r:\n" << r << "\n";
         Eigen::Matrix<T,3,3> rr=(T(1.0)-cos(theta))*r*r.transpose();
+        std::cout << "rr:\n" << rr << "\n";
         for(int i=0;i<3;i++)
             for(int j=0;j<3;j++)
                 extrin(i,j)+=rr(i,j);
         for(int i=0;i<3;i++)
             extrin(i,i)+=cos(theta);
         extrin=extrin.inverse().eval();
+        std::cout << "inverse extrinsics:\n" << extrin << "\n";
+        std::cout << "point_in:\n" << point_in[0] << "," << point_in[1] << "," << point_in[2] << "\n";
         Eigen::Matrix<T,4,1> pt_in;
         pt_in(0,0)=point_in[0];
         pt_in(1,0)=point_in[1];
@@ -539,16 +542,19 @@ struct ZCostFunctorPnP
         point_out[0]=pt_out(0,0);
         point_out[1]=pt_out(1,0);
         point_out[2]=pt_out(2,0);
+        std::cout << "point_out: " << point_out[0] << "," << point_out[1] << "," << point_out[2] << "\n";
 		
 		// projection 
 		T x = point_out[0] / point_out[2];
 		T y = point_out[1] / point_out[2];
-        std::cout << "x: " << x << "\n";
-        std::cout << "y: " << y << "\n";
+        std::cout << "x_homog: " << x << "\n";
+        std::cout << "y_homog: " << y << "\n";
 		// undistortation with dist coefficients as [k1, k2, p1, p2, k3]
 		// if (!D_empty())
 		T r2 = x * x + y * y;
+        std::cout << "r2: " << r2 << "\n";
 		T xy = x * y;
+        std::cout << "xy: " << xy << "\n";
 		x = x * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[2]
 			+ (r2 + 2.0*x * x) * D_[3];
 		y = y * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[3]
@@ -556,6 +562,11 @@ struct ZCostFunctorPnP
 		// to image plane
         std::cout << "x: " << x << "\n";
         std::cout << "y: " << y << "\n";
+        std::cout << "K[0,0]: "  << K_[0][0] << "\n";
+        std::cout << "K[0,2]: "  << K_[0][2] << "\n";
+        std::cout << "K[1,1]: "  << K_[1][1] << "\n";
+        std::cout << "K[1,2]: "  << K_[1][2] << "\n";
+
 		T u = x * K_[0][0] + K_[0][2];
 		T v = y * K_[1][1] + K_[1][2];
 		
