@@ -8,6 +8,7 @@
 #include "calibration/pnp_solver.hpp"
 #include "calibration/find_homography.hpp"
 #include <iostream>
+#include <typeinfo>
 
 bool solvePnPbyDLT(const Eigen::Matrix3d &K,
                    const std::vector<Eigen::Vector3d> &pts3d,
@@ -473,11 +474,26 @@ struct ZCostFunctorPnP
 		point_in[0] = T(object_point_[0]);
 		point_in[1] = T(object_point_[1]);
 		point_in[2] = T(object_point_[2]);
+        std::cout << "point_in: " << point_in[0] << ", " << point_in[1] << ", " << point_in[2] << "\n";
+        std::cout << "rot: " << rot[0] << ", " << rot[1] << ", " << rot[2] << "\n";
+        T intermediate = rot[0]*rot[0];
+        std::cout << "intermediate: " << intermediate << "\n";
+        T intermediate1 = rot[0]*rot[0] + rot[1]*rot[1];
+        std::cout << "intermediate1: " << intermediate1 << "\n";
+        T intermediate2 = rot[0]*rot[0] + rot[1]*rot[1] + rot[2] * rot[2];
+        std::cout << "intermediate2: " << intermediate2 << "\n";
+        T intermediate3 = sqrt(rot[0]*rot[0] + rot[1]*rot[1] + rot[2] * rot[2]);
+        std::cout << "intermediate3: " << intermediate3 << "\n";
+
 		// rotation
-        T theta=sqrt(rot[0]*rot[0]+rot[1]*rot[1]+rot[2]*rot[2]);
+        T theta=sqrt(rot[0]*rot[0]+rot[1]*rot[1]+rot[2]*rot[2]+1e-8);
+        std::cout << "theta: " << theta << "\n";
         T rx=rot[0]/theta;
+        std::cout << "rx: " << rx << "\n";
         T ry=rot[1]/theta;
+        std::cout << "ry: " << ry << "\n";
         T rz=rot[2]/theta;
+        std::cout << "rz: " << rz << "\n";
         Eigen::Matrix<T,4,4> extrin;
         extrin(0,0)=T(0.0);
         extrin(0,1)=sin(theta)*(-rz);
@@ -495,10 +511,18 @@ struct ZCostFunctorPnP
         extrin(3,1)=T(0.0);
         extrin(3,2)=T(0.0);
         extrin(3,3)=T(1.0);
+        std::cout << "extrin:\n";
+        for (int i=0; i<3; i++) {
+            for (int j=0; j<3; j++) {
+                std::cout << extrin(i, j) << ", ";
+            }
+            std::cout << "\n";
+        }
         Eigen::Matrix<T,3,1> r;
         r(0,0)=rx;
         r(1,0)=ry;
         r(2,0)=rz;
+        std::cout << "r: " << r << "\n";
         Eigen::Matrix<T,3,3> rr=(T(1.0)-cos(theta))*r*r.transpose();
         for(int i=0;i<3;i++)
             for(int j=0;j<3;j++)
@@ -519,6 +543,8 @@ struct ZCostFunctorPnP
 		// projection 
 		T x = point_out[0] / point_out[2];
 		T y = point_out[1] / point_out[2];
+        std::cout << "x: " << x << "\n";
+        std::cout << "y: " << y << "\n";
 		// undistortation with dist coefficients as [k1, k2, p1, p2, k3]
 		// if (!D_empty())
 		T r2 = x * x + y * y;
@@ -528,15 +554,19 @@ struct ZCostFunctorPnP
 		y = y * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[3]
 			+ (r2 + 2.0*y * y) * D_[2];
 		// to image plane
+        std::cout << "x: " << x << "\n";
+        std::cout << "y: " << y << "\n";
 		T u = x * K_[0][0] + K_[0][2];
 		T v = y * K_[1][1] + K_[1][2];
 		
 		T u_img = T(image_point_[0]);
 		T v_img = T(image_point_[1]);
+        std::cout << "u: " << u << ", u_img: " << u_img << "\n";
+        std::cout << "v: " << v << ", v_img: " << v_img << "\n";
 
 		residual[0] = u - u_img;
 		residual[1] = v - v_img;
-        // std::cout<<"residual: "<<residual[0]<<','<<residual[1]<<std::endl;
+        std::cout<<"residual: "<<residual[0]<<','<<residual[1]<<std::endl;
 
 		return true;
 	}

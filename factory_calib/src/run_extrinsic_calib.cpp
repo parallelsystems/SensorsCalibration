@@ -92,6 +92,19 @@ int main(int argc, char **argv) {
     // calibration result
     std::vector<float> rvec(3, 0.), tvec(3, 0.);
     solveCamPnP(obj_pts, pts2d, intrinsic, dist, rvec, tvec); // solver
+
+    json extrinsics;
+    extrinsics["r"] = rvec;
+    extrinsics["t"] = tvec;
+
+    std::ofstream extrinsics_file("output/extrinsics.json");
+    if (!extrinsics_file.is_open()) {
+      std::cerr << "Failed to open extrinsics file\n";
+      return -1;
+    }
+
+    extrinsics_file << std::setw(4) << extrinsics << std::endl;
+    extrinsics_file.close();
   }
 
   // LiDAR to Car extrinsic
