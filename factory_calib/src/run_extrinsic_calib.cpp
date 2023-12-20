@@ -90,7 +90,8 @@ int main(int argc, char **argv) {
     }
 
     // calibration result
-    std::vector<float> rvec(3, 0.), tvec(3, 0.);
+    std::vector<float> rvec = {0.0, 0.0, 0.0};
+    std::vector<float> tvec = {0.0, 0.0, 0.0};
     solveCamPnP(obj_pts, pts2d, intrinsic, dist, rvec, tvec); // solver
 
     json extrinsics;
