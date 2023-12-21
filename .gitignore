@@ -3,6 +3,7 @@ bin/
 build/
 cmake-build-debug/
 cmake-build-release/
+dist/
 .idea
 .vscode
 __pycache__/
@@ -10,3 +11,4 @@ __pycache__/
 *$py.class
 factory_calib/tmp/
 factory_calib/output/
+SensorsCalibration.egg-info/
