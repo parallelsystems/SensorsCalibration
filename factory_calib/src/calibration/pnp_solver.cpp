@@ -359,111 +359,21 @@ Eigen::MatrixXd covertPointsHomogenous(const std::vector<T> &pts) {
     return homo_pts;
 }
 
-struct YCostFunctorPnP
-{
-    std::vector<float> object_point_;
-    std::vector<float> lidar_point_;
-    double *tra_;
-    YCostFunctorPnP( std::vector<float> objpoint,  std::vector<float> lidarpoint,double *tra):
-        object_point_(objpoint), lidar_point_(lidarpoint),tra_(tra){}
-
-    template<typename T>
-    bool operator()(const T* const rot, const T* const tra, T* residual) const
-    {
-        T point_in[3];
-        T point_out[3];
-        point_in[0] = T(lidar_point_[0]);
-        point_in[1] = T(lidar_point_[1]);
-        point_in[2] = T(lidar_point_[2]);
-        // rotation
-        ceres::AngleAxisRotatePoint(rot, point_in, point_out);  // rotate point by the given rot value
-        // translation
-        point_out[0] += T(tra_[0]);
-        point_out[1] += T(tra_[1]);
-        point_out[2] += T(tra_[2]);
-
-        residual[0] = point_out[0] - T(object_point_[0]);
-        residual[1] = point_out[1] - T(object_point_[1]);
-        residual[2] = point_out[2] - T(object_point_[2]);
-        // std::cout<<"residual: "<<residual[0]<<','<<residual[1]<<','<<residual[2]<<std::endl;
-
-        return true;
-    }
-
-    static ceres::CostFunction* create( std::vector<float> objpoint, 
-         std::vector<float> lidarpoint,double *tra)
-    {
-        return new ceres::AutoDiffCostFunction<YCostFunctorPnP, 3, 3, 3>
-            (new YCostFunctorPnP(objpoint, lidarpoint,tra));
-    }
-};
-
-struct XCostFunctorPnP
+/*
+ * Cost function for solving LiDAR -> camera extrinsics
+ *
+ * `WCostFunctorPnP` predicts a rotation and translation between a set of points in 3D and a set in 2D.
+ * It assumes the 2D points come from a camera with known extrinsics. Additionally, it is assumed that
+ * the camera inputs have already been corrected for distortion. It predicts rotation in axis-angle form,
+ * producing a vector r = [rx, ry, rz]. The rotation axis is r and the rotation angle is ||r|| (radians).
+ */
+struct WCostFunctorPnP
 {
     std::vector<float> object_point_;
     std::vector<float> image_point_;
     std::vector< std::vector<double> > K_;
     std::vector<double> D_;
-    double *tra_;
-    XCostFunctorPnP( std::vector<float> objpoint,  std::vector<float> imgpoint,  std::vector< std::vector<double> > camera_intrinsic,  std::vector<double> dist_coeffs,double *tra):
-        object_point_(objpoint), image_point_(imgpoint), K_(camera_intrinsic), D_(dist_coeffs),tra_(tra){}
-
-    template<typename T>
-    bool operator()(const T* const rot, const T* const tra, T* residual) const
-    {
-        T point_in[3];
-        T point_out[3];
-        point_in[0] = T(object_point_[0]);
-        point_in[1] = T(object_point_[1]);
-        point_in[2] = T(object_point_[2]);
-        // rotation
-        ceres::AngleAxisRotatePoint(rot, point_in, point_out);  // rotate point by the given rot value
-        // translation
-        point_out[0] += T(tra[0]);
-        point_out[1] += T(tra[1]);
-        point_out[2] += T(tra[2]);
-        
-        // projection 
-        T x = point_out[0] / point_out[2];
-        T y = point_out[1] / point_out[2];
-        // undistortation with dist coefficients as [k1, k2, p1, p2, k3]
-        // if (!D_empty())
-        T r2 = x * x + y * y;
-        T xy = x * y;
-        x = x * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[2]
-            + (r2 + 2.0*x * x) * D_[3];
-        y = y * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[3]
-            + (r2 + 2.0*y * y) * D_[2];
-        // to image plane
-        T u = x * K_[0][0] + K_[0][2];
-        T v = y * K_[1][1] + K_[1][2];
-        
-        T u_img = T(image_point_[0]);
-        T v_img = T(image_point_[1]);
-
-        residual[0] = u - u_img;
-        residual[1] = v - v_img;
-        // std::cout<<"residual: "<<residual[0]<<','<<residual[1]<<std::endl;
-
-        return true;
-    }
-
-    static ceres::CostFunction* create( std::vector<float> objpoint, 
-         std::vector<float> imgpoint,  std::vector< std::vector<double> > camera_intrinsic,  std::vector<double> dist_coeffs,double *tra)
-    {
-        return new ceres::AutoDiffCostFunction<XCostFunctorPnP, 2, 3, 3>
-            (new XCostFunctorPnP(objpoint, imgpoint, camera_intrinsic, dist_coeffs,tra));
-    }
-};
-
-struct ZCostFunctorPnP
-{
-    std::vector<float> object_point_;
-    std::vector<float> image_point_;
-    std::vector< std::vector<double> > K_;
-    std::vector<double> D_;
-    // double *tra_;
-    ZCostFunctorPnP( std::vector<float> objpoint,  std::vector<float> imgpoint,  std::vector< std::vector<double> > camera_intrinsic,  std::vector<double> dist_coeffs):
+    WCostFunctorPnP( std::vector<float> objpoint,  std::vector<float> imgpoint,  std::vector< std::vector<double> > camera_intrinsic,  std::vector<double> dist_coeffs):
         object_point_(objpoint), image_point_(imgpoint), K_(camera_intrinsic), D_(dist_coeffs) {}
 
     template<typename T>
@@ -525,15 +435,6 @@ struct ZCostFunctorPnP
         T x = point_out[0] / point_out[2];
         T y = point_out[1] / point_out[2];
 
-        // undistortation with dist coefficients as [k1, k2, p1, p2, k3]
-        // if (!D_empty())
-        T r2 = x * x + y * y;
-        T xy = x * y;
-        x = x * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[2]
-            + (r2 + 2.0*x * x) * D_[3];
-        y = y * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[3]
-            + (r2 + 2.0*y * y) * D_[2];
-
         // to image plane
         T u = x * K_[0][0] + K_[0][2];
         T v = y * K_[1][1] + K_[1][2];
@@ -550,9 +451,200 @@ struct ZCostFunctorPnP
     static ceres::CostFunction* create( std::vector<float> objpoint, 
          std::vector<float> imgpoint,  std::vector< std::vector<double> > camera_intrinsic,  std::vector<double> dist_coeffs)
     {
-        return new ceres::AutoDiffCostFunction<ZCostFunctorPnP, 2, 3, 3>
-            (new ZCostFunctorPnP(objpoint, imgpoint, camera_intrinsic, dist_coeffs));
+        return new ceres::AutoDiffCostFunction<WCostFunctorPnP, 2, 3, 3>
+            (new WCostFunctorPnP(objpoint, imgpoint, camera_intrinsic, dist_coeffs));
     }
+};
+
+struct XCostFunctorPnP
+{
+    std::vector<float> object_point_;
+    std::vector<float> image_point_;
+    std::vector< std::vector<double> > K_;
+    std::vector<double> D_;
+    double *tra_;
+    XCostFunctorPnP( std::vector<float> objpoint,  std::vector<float> imgpoint,  std::vector< std::vector<double> > camera_intrinsic,  std::vector<double> dist_coeffs,double *tra):
+        object_point_(objpoint), image_point_(imgpoint), K_(camera_intrinsic), D_(dist_coeffs),tra_(tra){}
+
+    template<typename T>
+    bool operator()(const T* const rot, const T* const tra, T* residual) const
+    {
+        T point_in[3];
+        T point_out[3];
+        point_in[0] = T(object_point_[0]);
+        point_in[1] = T(object_point_[1]);
+        point_in[2] = T(object_point_[2]);
+        // rotation
+        ceres::AngleAxisRotatePoint(rot, point_in, point_out);  // rotate point by the given rot value
+        // translation
+        point_out[0] += T(tra[0]);
+        point_out[1] += T(tra[1]);
+        point_out[2] += T(tra[2]);
+        
+        // projection 
+        T x = point_out[0] / point_out[2];
+        T y = point_out[1] / point_out[2];
+        // undistortation with dist coefficients as [k1, k2, p1, p2, k3]
+        // if (!D_empty())
+        T r2 = x * x + y * y;
+        T xy = x * y;
+        x = x * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[2]
+            + (r2 + 2.0*x * x) * D_[3];
+        y = y * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[3]
+            + (r2 + 2.0*y * y) * D_[2];
+        // to image plane
+        T u = x * K_[0][0] + K_[0][2];
+        T v = y * K_[1][1] + K_[1][2];
+        
+        T u_img = T(image_point_[0]);
+        T v_img = T(image_point_[1]);
+
+        residual[0] = u - u_img;
+        residual[1] = v - v_img;
+        // std::cout<<"residual: "<<residual[0]<<','<<residual[1]<<std::endl;
+
+        return true;
+    }
+
+    static ceres::CostFunction* create( std::vector<float> objpoint, 
+         std::vector<float> imgpoint,  std::vector< std::vector<double> > camera_intrinsic,  std::vector<double> dist_coeffs,double *tra)
+    {
+        return new ceres::AutoDiffCostFunction<XCostFunctorPnP, 2, 3, 3>
+            (new XCostFunctorPnP(objpoint, imgpoint, camera_intrinsic, dist_coeffs,tra));
+    }
+};
+
+struct YCostFunctorPnP
+{
+    std::vector<float> object_point_;
+    std::vector<float> lidar_point_;
+    double *tra_;
+    YCostFunctorPnP( std::vector<float> objpoint,  std::vector<float> lidarpoint,double *tra):
+        object_point_(objpoint), lidar_point_(lidarpoint),tra_(tra){}
+
+    template<typename T>
+    bool operator()(const T* const rot, const T* const tra, T* residual) const
+    {
+        T point_in[3];
+        T point_out[3];
+        point_in[0] = T(lidar_point_[0]);
+        point_in[1] = T(lidar_point_[1]);
+        point_in[2] = T(lidar_point_[2]);
+        // rotation
+        ceres::AngleAxisRotatePoint(rot, point_in, point_out);  // rotate point by the given rot value
+        // translation
+        point_out[0] += T(tra_[0]);
+        point_out[1] += T(tra_[1]);
+        point_out[2] += T(tra_[2]);
+
+        residual[0] = point_out[0] - T(object_point_[0]);
+        residual[1] = point_out[1] - T(object_point_[1]);
+        residual[2] = point_out[2] - T(object_point_[2]);
+        // std::cout<<"residual: "<<residual[0]<<','<<residual[1]<<','<<residual[2]<<std::endl;
+
+        return true;
+    }
+
+    static ceres::CostFunction* create( std::vector<float> objpoint, 
+         std::vector<float> lidarpoint,double *tra)
+    {
+        return new ceres::AutoDiffCostFunction<YCostFunctorPnP, 3, 3, 3>
+            (new YCostFunctorPnP(objpoint, lidarpoint,tra));
+    }
+};
+
+struct ZCostFunctorPnP
+{
+	std::vector<float> object_point_;
+	std::vector<float> image_point_;
+	std::vector< std::vector<double> > K_;
+	std::vector<double> D_;
+    double *tra_;
+	ZCostFunctorPnP( std::vector<float> objpoint,  std::vector<float> imgpoint,  std::vector< std::vector<double> > camera_intrinsic,  std::vector<double> dist_coeffs,double *tra):
+		object_point_(objpoint), image_point_(imgpoint), K_(camera_intrinsic), D_(dist_coeffs),tra_(tra){}
+
+	template<typename T>
+	bool operator()(const T* const rot, const T* const tra, T* residual) const
+	{
+		T point_in[3];
+		T point_out[3];
+		point_in[0] = T(object_point_[0]);
+		point_in[1] = T(object_point_[1]);
+		point_in[2] = T(object_point_[2]);
+		// rotation
+        T theta=sqrt(rot[0]*rot[0]+rot[1]*rot[1]+rot[2]*rot[2]);
+        T rx=rot[0]/theta;
+        T ry=rot[1]/theta;
+        T rz=rot[2]/theta;
+        Eigen::Matrix<T,4,4> extrin;
+        extrin(0,0)=T(0.0);
+        extrin(0,1)=sin(theta)*(-rz);
+        extrin(0,2)=sin(theta)*(ry);
+        extrin(0,3)=T(tra_[0]);
+        extrin(1,0)=sin(theta)*(rz);
+        extrin(1,1)=T(0.0);
+        extrin(1,2)=sin(theta)*(-rx);
+        extrin(1,3)=T(tra_[1]);
+        extrin(2,0)=sin(theta)*(-ry);
+        extrin(2,1)=sin(theta)*(rx);
+        extrin(2,2)=T(0.0);
+        extrin(2,3)=T(tra_[2]);
+        extrin(3,0)=T(0.0);
+        extrin(3,1)=T(0.0);
+        extrin(3,2)=T(0.0);
+        extrin(3,3)=T(1.0);
+        Eigen::Matrix<T,3,1> r;
+        r(0,0)=rx;
+        r(1,0)=ry;
+        r(2,0)=rz;
+        Eigen::Matrix<T,3,3> rr=(T(1.0)-cos(theta))*r*r.transpose();
+        for(int i=0;i<3;i++)
+            for(int j=0;j<3;j++)
+                extrin(i,j)+=rr(i,j);
+        for(int i=0;i<3;i++)
+            extrin(i,i)+=cos(theta);
+        extrin=extrin.inverse().eval();
+        Eigen::Matrix<T,4,1> pt_in;
+        pt_in(0,0)=point_in[0];
+        pt_in(1,0)=point_in[1];
+        pt_in(2,0)=point_in[2];
+        pt_in(3,0)=T(1.0);
+        Eigen::Matrix<T,4,1> pt_out=extrin*pt_in;
+        point_out[0]=pt_out(0,0);
+        point_out[1]=pt_out(1,0);
+        point_out[2]=pt_out(2,0);
+		
+		// projection 
+		T x = point_out[0] / point_out[2];
+		T y = point_out[1] / point_out[2];
+		// undistortation with dist coefficients as [k1, k2, p1, p2, k3]
+		// if (!D_empty())
+		T r2 = x * x + y * y;
+		T xy = x * y;
+		x = x * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[2]
+			+ (r2 + 2.0*x * x) * D_[3];
+		y = y * (1.0 + D_[0] * r2 + D_[1] * r2 * r2) + 2.0 * xy * D_[3]
+			+ (r2 + 2.0*y * y) * D_[2];
+		// to image plane
+		T u = x * K_[0][0] + K_[0][2];
+		T v = y * K_[1][1] + K_[1][2];
+		
+		T u_img = T(image_point_[0]);
+		T v_img = T(image_point_[1]);
+
+		residual[0] = u - u_img;
+		residual[1] = v - v_img;
+        // std::cout<<"residual: "<<residual[0]<<','<<residual[1]<<std::endl;
+
+		return true;
+	}
+
+	static ceres::CostFunction* create( std::vector<float> objpoint, 
+		 std::vector<float> imgpoint,  std::vector< std::vector<double> > camera_intrinsic,  std::vector<double> dist_coeffs,double *tra)
+	{
+		return new ceres::AutoDiffCostFunction<ZCostFunctorPnP, 2, 3, 3>
+			(new ZCostFunctorPnP(objpoint, imgpoint, camera_intrinsic, dist_coeffs,tra));
+	}
 };
 
 bool solvePnPbyInitialParams(std::vector< std::vector<float> >& objpoints,  std::vector< std::vector<float> >& imgpoints, 
@@ -605,7 +697,7 @@ bool solveCamPnP(std::vector< std::vector<float> >& objpoints,  std::vector< std
     ceres::Problem problem;
     for (int i = 0; i < imgpoints.size(); i++)
     {
-        ceres::CostFunction* cost = ZCostFunctorPnP::create(objpoints[i], imgpoints[i], camera_intrinsic, dist_coeffs);
+        ceres::CostFunction* cost = WCostFunctorPnP::create(objpoints[i], imgpoints[i], camera_intrinsic, dist_coeffs);
         problem.AddResidualBlock(cost, nullptr, rot, tra);
     }
 
