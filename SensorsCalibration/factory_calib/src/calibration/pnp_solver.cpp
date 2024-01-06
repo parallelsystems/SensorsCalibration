@@ -708,6 +708,7 @@ bool solveCamPnP(std::vector< std::vector<float> >& objpoints,  std::vector< std
     options.max_num_iterations = 800;
     options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
     options.minimizer_progress_to_stdout = false;
+    options.logging_type = ceres::SILENT;
 
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
