@@ -31,8 +31,8 @@ using json = nlohmann::json;
  */
 
 int main(int argc, char **argv) {
-  if (argc > 1) {
-    std::cerr << argv[0];
+  if (argc != 7) {
+    std::cerr << "Incorrect number of arguments\n";
     return -1;
   }
 
@@ -90,8 +90,20 @@ int main(int argc, char **argv) {
     }
 
     // calibration result
-    std::vector<float> rvec = {0.0, 0.0, 0.0};
-    std::vector<float> tvec = {0.0, 0.0, 0.0};
+    std::vector<float> rvec = {atof(argv[1]), atof(argv[2]), atof(argv[3])};
+    std::cout << "Initial rotation estimate: {";
+    for (auto r : rvec) {
+      std::cout << r << ", ";
+    }
+    std::cout << "}\n";
+
+    std::vector<float> tvec = {atof(argv[4]), atof(argv[5]), atof(argv[6])};
+    std::cout << "Initial translation estimate: {";
+    for (auto t : tvec) {
+      std::cout << t << ", ";
+    }
+    std::cout << "}\n";
+
     solveCamPnP(obj_pts, pts2d, intrinsic, dist, rvec, tvec); // solver
 
     json extrinsics;
